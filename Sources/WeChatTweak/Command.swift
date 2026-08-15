@@ -10,11 +10,14 @@ import ArgumentParser
 struct Command {
     enum Error: @unchecked Sendable, LocalizedError {
         case executing(command: String, error: NSDictionary)
+        case invalidBinaryPath(String)
 
         var errorDescription: String? {
             switch self {
             case let .executing(command, error):
                 return "executing: \(command) error: \(error)"
+            case let .invalidBinaryPath(path):
+                return "Invalid patch binary path: \(path)"
             }
         }
     }
@@ -24,7 +27,23 @@ struct Command {
     }
 
     static func patch(app: URL, config: Config) async throws {
-        try Patcher.patch(binary: app.appendingPathComponent("Contents/MacOS/WeChat"), config: config)
+        let appRoot = app.standardizedFileURL.resolvingSymlinksInPath()
+        let entriesByBinary = Dictionary(grouping: config.targets, by: \.binary)
+
+        for relativePath in entriesByBinary.keys.sorted() {
+            let binary = app
+                .appendingPathComponent(relativePath)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+
+            guard binary.path.hasPrefix(appRoot.path + "/") else {
+                throw Error.invalidBinaryPath(relativePath)
+            }
+
+            let entries = entriesByBinary[relativePath, default: []].flatMap(\.entries)
+            print("Patching: \(relativePath)")
+            try Patcher.patch(binary: binary, entries: entries)
+        }
     }
 
     static func resign(app: URL) async throws {

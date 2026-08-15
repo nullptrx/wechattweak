@@ -10,20 +10,45 @@ import MachO
 import Foundation
 
 struct Patcher {
-    enum Error: Swift.Error {
+    enum Error: LocalizedError {
         case invalidFile
+        case invalidPatch(arch: String, va: UInt64)
         case not64BitMachO(magic: UInt32)
         case vaNotFound(arch: String, va: UInt64)
         case noArchMatched
+        case unexpectedBytes(arch: String, va: UInt64, expected: [Data], actual: Data)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidFile:
+                return "Invalid Mach-O file"
+            case let .invalidPatch(arch, va):
+                return "Invalid patch size for \(arch) at \(va.hexAddress)"
+            case let .not64BitMachO(magic):
+                return "Not a 64-bit Mach-O file (magic: \(String(format: "0x%08x", magic)))"
+            case let .vaNotFound(arch, va):
+                return "Virtual address \(va.hexAddress) was not found for \(arch)"
+            case .noArchMatched:
+                return "No configured architecture matched the Mach-O file"
+            case let .unexpectedBytes(arch, va, expected, actual):
+                let accepted = expected.map(\.hexString).joined(separator: " or ")
+                return "Unexpected bytes for \(arch) at \(va.hexAddress): expected \(accepted), found \(actual.hexString)"
+            }
+        }
     }
 
-    static func patch(binary: URL, config: Config) throws {
+    static func patch(binary: URL, entries: [Config.Entry]) throws {
         guard FileManager.default.fileExists(atPath: binary.path) else {
             throw Error.invalidFile
         }
 
-        let entries = config.targets.flatMap { $0.entries }
         guard !entries.isEmpty else { throw Error.noArchMatched }
+        for entry in entries {
+            guard !entry.asm.isEmpty,
+                  entry.expected.allSatisfy({ $0.count == entry.asm.count }) else {
+                throw Error.invalidPatch(arch: entry.arch.rawValue, va: entry.addr)
+            }
+        }
 
         let fh = try FileHandle(forUpdating: binary)
         defer { try? fh.close() }
@@ -66,6 +91,7 @@ struct Patcher {
                                       sliceOffset: UInt64(entry.offset),
                                       targetVA: target.addr,
                                       patch: target.asm,
+                                      expected: target.expected,
                                       archName: target.arch.rawValue)
                     patchedCount += 1
                 }
@@ -93,6 +119,7 @@ struct Patcher {
                                   sliceOffset: 0,
                                   targetVA: target.addr,
                                   patch: target.asm,
+                                  expected: target.expected,
                                   archName: target.arch.rawValue)
                 patchedCount += 1
             }
@@ -107,6 +134,7 @@ struct Patcher {
                                       sliceOffset: UInt64,
                                       targetVA: UInt64,
                                       patch: Data,
+                                      expected: [Data],
                                       archName: String) throws {
 
         // 读 slice 内 mach_header_64
@@ -148,6 +176,26 @@ struct Patcher {
                     print("[\(archName)] patch VA=\(String(format: "0x%llx", targetVA)), fileoff=\(String(format: "0x%llx", fileOffset))")
 
                     try fh.seek(toOffset: fileOffset)
+                    guard let current = try fh.read(upToCount: patch.count),
+                          current.count == patch.count else {
+                        throw Error.invalidFile
+                    }
+
+                    if current == patch {
+                        print("[\(archName)] already patched")
+                        return
+                    }
+
+                    if !expected.isEmpty && !expected.contains(current) {
+                        throw Error.unexpectedBytes(
+                            arch: archName,
+                            va: targetVA,
+                            expected: expected,
+                            actual: current
+                        )
+                    }
+
+                    try fh.seek(toOffset: fileOffset)
                     try fh.write(contentsOf: patch)
                     return
                 }
@@ -157,5 +205,17 @@ struct Patcher {
         }
 
         throw Error.vaNotFound(arch: archName, va: targetVA)
+    }
+}
+
+private extension Data {
+    var hexString: String {
+        map { String(format: "%02X", $0) }.joined()
+    }
+}
+
+private extension UInt64 {
+    var hexAddress: String {
+        String(format: "0x%llx", self)
     }
 }

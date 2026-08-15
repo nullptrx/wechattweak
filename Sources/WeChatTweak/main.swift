@@ -1,8 +1,6 @@
 //
 //  main.swift
 //
-//  Created by Sunny Young.
-//
 
 import Foundation
 import Dispatch
@@ -87,6 +85,24 @@ struct Tweak: AsyncParsableCommand {
     }
 
     struct Options: ParsableArguments {
+        private static let remoteConfig = URL(
+            string: "https://raw.githubusercontent.com/nullptrx/wechattweak/refs/heads/master/config.json"
+        )!
+
+        private static var defaultConfig: URL {
+            let executable = URL(fileURLWithPath: CommandLine.arguments[0])
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+            let localConfig = executable
+                .deletingLastPathComponent()
+                .appendingPathComponent("config.json")
+
+            if FileManager.default.fileExists(atPath: localConfig.path) {
+                return localConfig
+            }
+            return remoteConfig
+        }
+
         @Option(
             name: .shortAndLong,
             help: "Path of WeChat.app",
@@ -113,7 +129,7 @@ struct Tweak: AsyncParsableCommand {
                 }
             }
         )
-        var config: URL = URL(string:"https://raw.githubusercontent.com/sunnyyoung/WeChatTweak/refs/heads/master/config.json")!
+        var config: URL = Self.defaultConfig
     }
 
     static let configuration = CommandConfiguration(

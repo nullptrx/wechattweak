@@ -26,11 +26,13 @@ struct Config: Decodable {
     struct Entry: Decodable {
         let arch: Arch
         let addr: UInt64
+        let expected: [Data]
         let asm: Data
 
         private enum CodingKeys: CodingKey {
             case arch
             case addr
+            case expected
             case asm
         }
 
@@ -48,6 +50,27 @@ struct Config: Decodable {
                 }
                 return value
             }()
+            self.expected = try {
+                guard container.contains(.expected) else { return [] }
+
+                let values: [String]
+                if let value = try? container.decode(String.self, forKey: .expected) {
+                    values = [value]
+                } else {
+                    values = try container.decode([String].self, forKey: .expected)
+                }
+
+                return try values.map { hex in
+                    guard let value = Data(hex: hex) else {
+                        throw DecodingError.dataCorruptedError(
+                            forKey: CodingKeys.expected,
+                            in: container,
+                            debugDescription: "Invalid Entry.expected"
+                        )
+                    }
+                    return value
+                }
+            }()
             self.asm = try {
                 let hex = try container.decode(String.self, forKey: .asm)
                 guard let value = Data(hex: hex) else {
@@ -64,16 +87,20 @@ struct Config: Decodable {
 
     struct Target: Decodable {
         let identifier: String
+        let binary: String
         let entries: [Entry]
 
         private enum CodingKeys: CodingKey {
             case identifier
+            case binary
             case entries
         }
 
         init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             self.identifier = try container.decode(String.self, forKey: .identifier)
+            self.binary = try container.decodeIfPresent(String.self, forKey: .binary)
+                ?? "Contents/MacOS/WeChat"
             self.entries = try container.decode([Entry].self, forKey: .entries)
         }
     }
