@@ -56,7 +56,7 @@ struct Command {
         }
     }
 
-    static func resign(app: URL) async throws {
+    static func resign(app: URL, config: Config) async throws {
         let appPath = shellQuote(app.path)
         try await executeWithAdministratorFallback(
             command: "/usr/bin/xattr -cr \(appPath)"
@@ -64,11 +64,33 @@ struct Command {
         try await executeWithAdministratorFallback(
             command: "/usr/bin/codesign --remove-sign \(appPath)"
         )
+
+        let appRoot = app.standardizedFileURL.resolvingSymlinksInPath()
+        for relativePath in Set(config.targets.map(\.binary)).sorted() {
+            let binary = app
+                .appendingPathComponent(relativePath)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+
+            guard binary.path.hasPrefix(appRoot.path + "/") else {
+                throw Error.invalidBinaryPath(relativePath)
+            }
+
+            let binaryPath = shellQuote(binary.path)
+            print("Signing: \(relativePath)")
+            try await executeWithAdministratorFallback(
+                command: "/usr/bin/codesign --force --sign - --preserve-metadata=identifier,entitlements,flags,runtime \(binaryPath)"
+            )
+            try await executeWithAdministratorFallback(
+                command: "/usr/bin/codesign --verify --all-architectures --strict \(binaryPath)"
+            )
+        }
+
         try await executeWithAdministratorFallback(
             command: "/usr/bin/codesign --force --deep --sign - \(appPath)"
         )
         try await executeWithAdministratorFallback(
-            command: "/usr/bin/codesign --verify --deep --strict \(appPath)"
+            command: "/usr/bin/codesign --verify --all-architectures --deep --strict \(appPath)"
         )
     }
 
