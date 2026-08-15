@@ -8,7 +8,7 @@ A command-line tool for tweaking WeChat.
 
 ## 功能
 
-- 阻止消息撤回
+- 阻止消息撤回（微信 4.1.12 / 269365 会保留原生撤回提示）
 - 阻止自动更新
 - 客户端多开
 
