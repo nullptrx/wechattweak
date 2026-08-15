@@ -12,6 +12,13 @@ struct Command {
         case executing(command: String, error: NSDictionary)
         case invalidBinaryPath(String)
 
+        var isPermissionDenied: Bool {
+            guard case let .executing(_, error) = self else { return false }
+            let message = error.description.lowercased()
+            return message.contains("permission denied")
+                || message.contains("operation not permitted")
+        }
+
         var errorDescription: String? {
             switch self {
             case let .executing(command, error):
@@ -23,7 +30,10 @@ struct Command {
     }
 
     static func version(app: URL) async throws -> String? {
-        try await Command.execute(command: "defaults read \(app.appendingPathComponent("Contents/Info.plist").path) CFBundleVersion")
+        let infoPlist = shellQuote(app.appendingPathComponent("Contents/Info.plist").path)
+        return try await Command.execute(
+            command: "/usr/bin/defaults read \(infoPlist) CFBundleVersion"
+        )
     }
 
     static func patch(app: URL, config: Config) async throws {
@@ -47,14 +57,47 @@ struct Command {
     }
 
     static func resign(app: URL) async throws {
-        try await Command.execute(command: "codesign --remove-sign \(app.path)")
-        try await Command.execute(command: "codesign --force --deep --sign - \(app.path)")
-        try await Command.execute(command: "xattr -cr \(app.path)")
+        let appPath = shellQuote(app.path)
+        try await executeWithAdministratorFallback(
+            command: "/usr/bin/xattr -cr \(appPath)"
+        )
+        try await executeWithAdministratorFallback(
+            command: "/usr/bin/codesign --remove-sign \(appPath)"
+        )
+        try await executeWithAdministratorFallback(
+            command: "/usr/bin/codesign --force --deep --sign - \(appPath)"
+        )
+        try await executeWithAdministratorFallback(
+            command: "/usr/bin/codesign --verify --deep --strict \(appPath)"
+        )
     }
 
     @discardableResult
-    private static func execute(command: String) async throws -> String? {
-        guard let script = NSAppleScript(source: "do shell script \"\(command)\"") else {
+    private static func executeWithAdministratorFallback(command: String) async throws -> String? {
+        do {
+            return try await execute(command: command)
+        } catch let error as Command.Error where error.isPermissionDenied {
+            print("Permission denied. Requesting administrator privileges...")
+            return try await execute(
+                command: command,
+                administratorPrivileges: true
+            )
+        }
+    }
+
+    @discardableResult
+    private static func execute(
+        command: String,
+        administratorPrivileges: Bool = false
+    ) async throws -> String? {
+        let escapedCommand = command
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let privileges = administratorPrivileges ? " with administrator privileges" : ""
+
+        guard let script = NSAppleScript(
+            source: "do shell script \"\(escapedCommand)\"\(privileges)"
+        ) else {
             throw Error.executing(
                 command: command,
                 error: ["error": "Create script failed."]
@@ -72,5 +115,9 @@ struct Command {
         } else {
             return descriptor.stringValue
         }
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }

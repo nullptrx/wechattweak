@@ -18,6 +18,7 @@ extension Tweak {
             print("------ Current version ------")
             print(try await Command.version(app: options.app) ?? "unknown")
             print("------ Supported versions ------")
+            print("Config source: \(options.config.absoluteString)")
             try await Config.load(url: options.config).forEach({ print($0.version) })
             Darwin.exit(EXIT_SUCCESS)
         }
@@ -38,6 +39,7 @@ extension Tweak {
             print("WeChat version: \(version ?? "unknown")")
 
             print("------ Config ------")
+            print("Config source: \(options.config.absoluteString)")
             guard let config = (try await Config.load(url: options.config)).first(where: { $0.version == version }) else {
                 throw Error.unsupportedVersion
             }
@@ -90,15 +92,16 @@ struct Tweak: AsyncParsableCommand {
         )!
 
         private static var defaultConfig: URL {
-            let executable = URL(fileURLWithPath: CommandLine.arguments[0])
+            if let executable = Bundle.main.executableURL?
                 .standardizedFileURL
-                .resolvingSymlinksInPath()
-            let localConfig = executable
-                .deletingLastPathComponent()
-                .appendingPathComponent("config.json")
+                .resolvingSymlinksInPath() {
+                let localConfig = executable
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("config.json")
 
-            if FileManager.default.fileExists(atPath: localConfig.path) {
-                return localConfig
+                if FileManager.default.fileExists(atPath: localConfig.path) {
+                    return localConfig
+                }
             }
             return remoteConfig
         }
