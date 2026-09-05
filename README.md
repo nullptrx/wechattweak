@@ -8,7 +8,9 @@ A command-line tool for tweaking WeChat.
 
 ## 功能
 
-- 阻止消息撤回（微信 4.1.12 / 269365 会保留原生撤回提示）
+- 阻止他人消息撤回，保留原消息和原生撤回提示（微信 4.1.13 / 269628，Apple Silicon）
+- 自己撤回的消息走微信原生逻辑，正常撤回并显示原生提示（269628）
+- 保留旧版适配（4.1.12 / 269365 的防撤回仍作用于所有消息）
 - 阻止自动更新
 - 客户端多开
 
@@ -27,6 +29,18 @@ wechattweak patch
 # 查看所有支持的 WeChat 版本
 wechattweak versions
 ```
+
+### 使用本仓库的新版配置
+
+退出微信后，在仓库目录执行：
+
+```bash
+swift build -c release
+.build/release/wechattweak patch -c "$PWD/config.json"
+```
+
+269628 的配置仅包含 ARM64 防撤回适配，不包含自动更新或多开补丁。
+适配依据与验证方法见 [269628 适配说明](docs/wechat-269628.md)。
 
 ## 参考
 
