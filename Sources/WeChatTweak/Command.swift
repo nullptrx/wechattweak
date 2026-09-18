@@ -112,13 +112,51 @@ struct Command {
         command: String,
         administratorPrivileges: Bool = false
     ) async throws -> String? {
+        if !administratorPrivileges {
+            let process = Process()
+            let output = Pipe()
+            let errorOutput = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = ["-c", command]
+            process.standardOutput = output
+            process.standardError = errorOutput
+
+            do {
+                try process.run()
+            } catch {
+                throw Error.executing(
+                    command: command,
+                    error: ["error": error.localizedDescription]
+                )
+            }
+
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            let errorData = errorOutput.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            let message = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let errorMessage = String(data: errorData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard process.terminationStatus == 0 else {
+                throw Error.executing(
+                    command: command,
+                    error: [
+                        "status": process.terminationStatus,
+                        "output": message ?? "",
+                        "error": errorMessage ?? ""
+                    ]
+                )
+            }
+            return message
+        }
+
         let escapedCommand = command
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
-        let privileges = administratorPrivileges ? " with administrator privileges" : ""
 
         guard let script = NSAppleScript(
-            source: "do shell script \"\(escapedCommand)\"\(privileges)"
+            source: "do shell script \"\(escapedCommand)\" with administrator privileges"
         ) else {
             throw Error.executing(
                 command: command,
